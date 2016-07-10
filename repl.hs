@@ -10,13 +10,10 @@ import Text.ParserCombinators.Parsec hiding (spaces)
 import System.IO hiding (try)
 import Data.IORef
 
+
 main :: IO ()
 main = do args <- getArgs
 	  if null args then runRepl else runOne $ args
---          case length args of
---              0 -> runRepl
---              1 -> runOne $ args !! 0
---              otherwise -> putStrLn "Program takes only 0 or 1 argument"
 
 symbol :: Parser Char
 symbol = oneOf "!$%&|*+-/:<=>?@^_~"
@@ -32,6 +29,9 @@ readExprList = readOrThrow (endBy parseExpr spaces)
 spaces :: Parser ()
 spaces = skipMany1 space
 
+--                 --
+-- Lisp data types --
+--                 --
 data LispVal = Atom String
 	     | List [LispVal]
 	     | DottedList [LispVal] LispVal
@@ -53,6 +53,10 @@ escapedChars = do char '\\'
                    'n' -> do return "\n"
                    't' -> do return "\t"
                    'r' -> do return "\r"
+
+--                  --
+-- Parse data types --
+--                  --
 
 parseString :: Parser LispVal
 parseString = do char '"'
@@ -96,6 +100,9 @@ parseBin = do try $ string "#b"
               x <- many1 (oneOf "10")
               return $ Number (bin2dig x)
 
+--                     --
+-- Helpers for parsing --
+--                     --
 oct2dig x = fst $ readOct x !! 0
 hex2dig x = fst $ readHex x !! 0
 bin2dig = bin2dig' 0
@@ -148,6 +155,11 @@ parseQuoted = do
               x <- parseExpr
               return $ List [Atom "quote", x]
 
+
+
+--                   --
+-- Print Lisp Values --
+--                   --
 showVal :: LispVal -> String
 showVal (String contents)      = "\"" ++ contents ++ "\""
 showVal (Atom name)            = name
@@ -164,11 +176,15 @@ showVal (Func {params = args, vararg = varargs, body = body, closure = env}) =
 showVal (Port _)	       = "<IO port>"
 showVal (IOFunc _) 	       = "<IO primitive>"
 
+-- convert list to string --
 unwordsList :: [LispVal] -> String
 unwordsList = unwords . map showVal
 
 instance Show LispVal where show = showVal
 
+--           --
+-- Evaluator --
+--           --
 eval :: Env -> LispVal -> IOThrowsError LispVal
 eval env val@(String _) = return val
 eval env val@(Number _) = return val
@@ -207,6 +223,9 @@ apply (Func params varargs body closure) args = if num params /= num args && var
 			    Just argName -> liftIO $ bindVars env [(argName, List $ remainingArgs)]
 			    Nothing -> return env
 
+--                             --
+-- Scheme primitive operations --
+--                             --
 primitives :: [(String, [LispVal] -> ThrowsError LispVal)]
 primitives = [("+", numericBinop (+)),
               ("-", numericBinop (-)),
@@ -234,6 +253,9 @@ primitives = [("+", numericBinop (+)),
               ("eqv?", eqv),
               ("equal?", equal)]
 
+--                   --
+-- Binary operations --
+--                   --
 boolBinop :: (LispVal -> ThrowsError a) -> (a -> a -> Bool) -> [LispVal] -> ThrowsError LispVal
 boolBinop unpacker op args = if length args /= 2
                              then throwError $ NumArgs 2 args
@@ -268,6 +290,10 @@ unpackBool :: LispVal -> ThrowsError Bool
 unpackBool (Bool b) = return b
 unpackBool notBool  = throwError $ TypeMismatch "boolean" notBool
 
+
+--                    --
+-- Scheme car and cdr --
+--                    --
 car :: [LispVal] -> ThrowsError LispVal
 car [List (x : xs)]         = return x
 car [DottedList (x : xs) _] = return x
@@ -375,7 +401,7 @@ runOne args = do
 	>>=hPutStrLn stderr
 
 runRepl :: IO ()
-runRepl = primitiveBindings >>= until_ (== "quit") (readPrompt "Lisp>>> ") . evalAndPrint
+runRepl = primitiveBindings >>= until_ (== "exit") (readPrompt ">>> ") . evalAndPrint
 
 type Env = IORef [(String, IORef LispVal)]
 
