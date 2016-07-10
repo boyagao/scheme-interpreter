@@ -411,51 +411,9 @@ extractValue :: ThrowsError a -> a
 extractValue (Right val) = val
 
 
--- IO handling  --
---		--
---		--
-ioPrimitives :: [(String, [LispVal] -> IOThrowsError LispVal)]
-ioPrimitives = [("apply", applyProc),
-		("open-input-file", makePort ReadMode),
-		("open-output-file", makePort WriteMode),
-		("close-input-port", closePort),
-		("close-output-port", closePort),
-		("read", readProc),
-		("write", writeProc),
-		("read-contents", readContents),
-		("read-all", readAll)]
-
-applyProc :: [LispVal] -> IOThrowsError LispVal
-applyProc [func, List args] = apply func args
-applyProc (func : args)     = apply func args
-
-makePort :: IOMode -> [LispVal] -> IOThrowsError LispVal
-makePort mode [String filename] = liftM Port $ liftIO $ openFile filename mode
-
-closePort :: [LispVal] -> IOThrowsError LispVal
-closePort [Port port] = liftIO $hClose port >> (return $ Bool True)
-closePort 	    _ = return $ Bool False
-
-readProc :: [LispVal] -> IOThrowsError LispVal
-readProc 	  [] = readProc [Port stdin]
-readProc [Port port] = (liftIO $ hGetLine port) >>= liftThrows . readExpr
-
-writeProc :: [LispVal] -> IOThrowsError LispVal
-writeProc 	     [obj] = writeProc [obj, Port stdout]
-writeProc [obj, Port port] = liftIO $ hPrint port obj >> (return $ Bool True)
-
-readContents :: [LispVal] -> IOThrowsError LispVal
-readContents [String filename] = liftM String $ liftIO $ readFile filename
-
-readAll :: [LispVal] -> IOThrowsError LispVal
-readAll [String filename] = liftM List $ load filename
-
-load :: String -> IOThrowsError [LispVal]
-load filename = (liftIO $ readFile filename) >>= liftThrows . readExprList
-
---   Functions for build repl   --
---				--
---				--
+-- Functions for repl   --
+--			--
+--			--
 flushStr :: String -> IO ()
 flushStr str = putStr str >> hFlush stdout
 
@@ -529,3 +487,46 @@ primitiveBindings = nullEnv >>= (flip bindVars $ map (makeFunc IOFunc) ioPrimiti
 makeFunc varargs env params body = return $ Func (map showVal params) varargs body env
 makeNormalFunc = makeFunc Nothing
 makeVarargs = makeFunc . Just . showVal
+
+
+-- IO handling  --
+--		--
+--		--
+ioPrimitives :: [(String, [LispVal] -> IOThrowsError LispVal)]
+ioPrimitives = [("apply", applyProc),
+		("open-input-file", makePort ReadMode),
+		("open-output-file", makePort WriteMode),
+		("close-input-port", closePort),
+		("close-output-port", closePort),
+		("read", readProc),
+		("write", writeProc),
+		("read-contents", readContents),
+		("read-all", readAll)]
+
+applyProc :: [LispVal] -> IOThrowsError LispVal
+applyProc [func, List args] = apply func args
+applyProc (func : args)     = apply func args
+
+makePort :: IOMode -> [LispVal] -> IOThrowsError LispVal
+makePort mode [String filename] = liftM Port $ liftIO $ openFile filename mode
+
+closePort :: [LispVal] -> IOThrowsError LispVal
+closePort [Port port] = liftIO $hClose port >> (return $ Bool True)
+closePort 	    _ = return $ Bool False
+
+readProc :: [LispVal] -> IOThrowsError LispVal
+readProc 	  [] = readProc [Port stdin]
+readProc [Port port] = (liftIO $ hGetLine port) >>= liftThrows . readExpr
+
+writeProc :: [LispVal] -> IOThrowsError LispVal
+writeProc 	     [obj] = writeProc [obj, Port stdout]
+writeProc [obj, Port port] = liftIO $ hPrint port obj >> (return $ Bool True)
+
+readContents :: [LispVal] -> IOThrowsError LispVal
+readContents [String filename] = liftM String $ liftIO $ readFile filename
+
+readAll :: [LispVal] -> IOThrowsError LispVal
+readAll [String filename] = liftM List $ load filename
+
+load :: String -> IOThrowsError [LispVal]
+load filename = (liftIO $ readFile filename) >>= liftThrows . readExprList

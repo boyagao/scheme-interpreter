@@ -1,9 +1,5 @@
 {-# LANGUAGE ExistentialQuantification #-}
 
--- This is a scheme repl similar to Racket.
--- To link a library, use "(load "stdlib.scm")"
--- To exit, use "exit"
-
 module Main where
 
 import Control.Monad
@@ -19,64 +15,6 @@ main :: IO ()
 main = do args <- getArgs
 	  if null args then runRepl else runOne $ args
 
-
---				--
---  Monad and type definitions  --
---  (including class instances) --
-
-
--- Map env of string to lispval --
-type Env = IORef [(String, IORef LispVal)]
-
--- Use IO monad to handle layered errors/exceptions --
--- ExceptT is the monad transformer --
-type IOThrowsError = ExceptT LispError IO
-
--- Lets functions throw errors
-type ThrowsError = Either LispError
-
--- Error types  --
-data LispError = NumArgs Integer [LispVal]
-               | TypeMismatch String LispVal
-               | Parser ParseError
-               | BadSpecialForm String LispVal
-               | NotFunction String String
-               | UnboundVar String String
-               | Default String
-
--- unpack expression --
-data Unpacker = forall a. Eq a => AnyUnpacker (LispVal -> ThrowsError a)
-
--- Lisp data types --
-data LispVal = Atom String
-	     | List [LispVal]
-	     | DottedList [LispVal] LispVal
-	     | Number Integer
-	     | String String
-	     | Bool Bool
-	     | Character Char
-             | PrimitiveFunc ([LispVal] -> ThrowsError LispVal)
-	     | Func {params :: [String], vararg :: (Maybe String), body :: [LispVal], closure :: Env}
-	     | IOFunc ([LispVal] -> IOThrowsError LispVal)
-	     | Port Handle
-
-
--- Show instantiations for Error and Values
-instance Show LispError where show = showError
-
-instance Show LispVal where show = showVal
-
---
--- Deprecated Control.Monad.Error needed this but not Except package:
---
---instance Show LispError where
---     show EmptyString = "An error has occured"
---     show (O
---     noMsg = Default "An error has occured"
---     strMsg = Default
-
-
-
 symbol :: Parser Char
 symbol = oneOf "!$%&|*+-/:<=>?@^_~"
 
@@ -90,6 +28,21 @@ readExprList = readOrThrow (endBy parseExpr spaces)
 
 spaces :: Parser ()
 spaces = skipMany1 space
+
+--                 --
+-- Lisp data types --
+--                 --
+data LispVal = Atom String
+	     | List [LispVal]
+	     | DottedList [LispVal] LispVal
+	     | Number Integer
+	     | String String
+	     | Bool Bool
+	     | Character Char
+             | PrimitiveFunc ([LispVal] -> ThrowsError LispVal)
+	     | Func {params :: [String], vararg :: (Maybe String), body :: [LispVal], closure :: Env}
+	     | IOFunc ([LispVal] -> IOThrowsError LispVal)
+	     | Port Handle
 
 escapedChars :: Parser String
 escapedChars = do char '\\'
@@ -223,11 +176,11 @@ showVal (Func {params = args, vararg = varargs, body = body, closure = env}) =
 showVal (Port _)	       = "<IO port>"
 showVal (IOFunc _) 	       = "<IO primitive>"
 
-
 -- convert list to string --
 unwordsList :: [LispVal] -> String
 unwordsList = unwords . map showVal
 
+instance Show LispVal where show = showVal
 
 --           --
 -- Evaluator --
@@ -318,8 +271,6 @@ numericBinop :: (Integer -> Integer -> Integer) -> [LispVal] -> ThrowsError Lisp
 numericBinop op singleVal@[_] = throwError $ NumArgs 2 singleVal
 numericBinop op params = mapM unpackNum params >>= return . Number . foldl1 op
 
-
--- Unpack Lisp to correponding data
 unpackNum :: LispVal -> ThrowsError Integer
 unpackNum (Number n) = return n
 unpackNum (String n) = let parsed = reads n in
@@ -339,9 +290,10 @@ unpackBool :: LispVal -> ThrowsError Bool
 unpackBool (Bool b) = return b
 unpackBool notBool  = throwError $ TypeMismatch "boolean" notBool
 
---                    	  --
--- Scheme car/cdr and eqv --
---                    	  --
+
+--                    --
+-- Scheme car and cdr --
+--                    --
 car :: [LispVal] -> ThrowsError LispVal
 car [List (x : xs)]         = return x
 car [DottedList (x : xs) _] = return x
@@ -376,14 +328,21 @@ eqv [(List arg1), (List arg2)]             = return $ Bool $ (length arg1 == len
 eqv [_, _]				   = return $ Bool False
 eqv badArgList 				   = throwError $ NumArgs 2 badArgList
 
+data LispError = NumArgs Integer [LispVal]
+               | TypeMismatch String LispVal
+               | Parser ParseError
+               | BadSpecialForm String LispVal
+               | NotFunction String String
+               | UnboundVar String String
+               | Default String
 
--- helper for unpacking equal? function
+data Unpacker = forall a. Eq a => AnyUnpacker (LispVal -> ThrowsError a)
+
 unpackEquals :: LispVal -> LispVal -> Unpacker -> ThrowsError Bool
 unpackEquals arg1 arg2 (AnyUnpacker unpacker) = do unpacked1 <- unpacker arg1
                                                    unpacked2 <- unpacker arg2
                                                    return $ unpacked1 == unpacked2
                                                 `catchError` (const $ return False)
-
 
 equal :: [LispVal] -> ThrowsError LispVal
 equal [arg1, arg2] = do primitiveEquals <- liftM or $ mapM (unpackEquals arg1 arg2)
@@ -392,10 +351,6 @@ equal [arg1, arg2] = do primitiveEquals <- liftM or $ mapM (unpackEquals arg1 ar
                         return $ Bool $ (primitiveEquals || let (Bool x) = eqvEquals in x)
 equal badArgList    = throwError $ NumArgs 2 badArgList
 
-
--- Error Handling --
---		  --
---		  --
 showError :: LispError -> String
 showError (UnboundVar message varname)  = message ++ ": " ++ varname
 showError (BadSpecialForm message form) = message ++ ": " ++ show form
@@ -404,58 +359,24 @@ showError (NumArgs expected found)      = "Expected " ++ show expected ++ " args
 showError (TypeMismatch expected found) = "Invalid type: expected " ++ expected ++ ", found " ++ show found
 showError (Parser parseErr)             = "Parse error at " ++ show parseErr
 
+instance Show LispError where show = showError
+
+--
+-- Deprecated Control.Monad.Error needed this but not Except package:
+--
+--instance Show LispError where
+--     show EmptyString = "An error has occured"
+--     show (O
+--     noMsg = Default "An error has occured"
+--     strMsg = Default
+
+type ThrowsError = Either LispError
 
 trapError action = catchError action (return . show)
 
 extractValue :: ThrowsError a -> a
 extractValue (Right val) = val
 
-
--- IO handling  --
---		--
---		--
-ioPrimitives :: [(String, [LispVal] -> IOThrowsError LispVal)]
-ioPrimitives = [("apply", applyProc),
-		("open-input-file", makePort ReadMode),
-		("open-output-file", makePort WriteMode),
-		("close-input-port", closePort),
-		("close-output-port", closePort),
-		("read", readProc),
-		("write", writeProc),
-		("read-contents", readContents),
-		("read-all", readAll)]
-
-applyProc :: [LispVal] -> IOThrowsError LispVal
-applyProc [func, List args] = apply func args
-applyProc (func : args)     = apply func args
-
-makePort :: IOMode -> [LispVal] -> IOThrowsError LispVal
-makePort mode [String filename] = liftM Port $ liftIO $ openFile filename mode
-
-closePort :: [LispVal] -> IOThrowsError LispVal
-closePort [Port port] = liftIO $hClose port >> (return $ Bool True)
-closePort 	    _ = return $ Bool False
-
-readProc :: [LispVal] -> IOThrowsError LispVal
-readProc 	  [] = readProc [Port stdin]
-readProc [Port port] = (liftIO $ hGetLine port) >>= liftThrows . readExpr
-
-writeProc :: [LispVal] -> IOThrowsError LispVal
-writeProc 	     [obj] = writeProc [obj, Port stdout]
-writeProc [obj, Port port] = liftIO $ hPrint port obj >> (return $ Bool True)
-
-readContents :: [LispVal] -> IOThrowsError LispVal
-readContents [String filename] = liftM String $ liftIO $ readFile filename
-
-readAll :: [LispVal] -> IOThrowsError LispVal
-readAll [String filename] = liftM List $ load filename
-
-load :: String -> IOThrowsError [LispVal]
-load filename = (liftIO $ readFile filename) >>= liftThrows . readExprList
-
---   Functions for build repl   --
---				--
---				--
 flushStr :: String -> IO ()
 flushStr str = putStr str >> hFlush stdout
 
@@ -482,9 +403,12 @@ runOne args = do
 runRepl :: IO ()
 runRepl = primitiveBindings >>= until_ (== "exit") (readPrompt ">>> ") . evalAndPrint
 
+type Env = IORef [(String, IORef LispVal)]
+
 nullEnv :: IO Env
 nullEnv = newIORef []
 
+type IOThrowsError = ExceptT LispError IO
 
 liftThrows :: ThrowsError a -> IOThrowsError a
 liftThrows (Left err)  = throwError err
@@ -529,3 +453,42 @@ primitiveBindings = nullEnv >>= (flip bindVars $ map (makeFunc IOFunc) ioPrimiti
 makeFunc varargs env params body = return $ Func (map showVal params) varargs body env
 makeNormalFunc = makeFunc Nothing
 makeVarargs = makeFunc . Just . showVal
+
+ioPrimitives :: [(String, [LispVal] -> IOThrowsError LispVal)]
+ioPrimitives = [("apply", applyProc),
+		("open-input-file", makePort ReadMode),
+		("open-output-file", makePort WriteMode),
+		("close-input-port", closePort),
+		("close-output-port", closePort),
+		("read", readProc),
+		("write", writeProc),
+		("read-contents", readContents),
+		("read-all", readAll)]
+
+applyProc :: [LispVal] -> IOThrowsError LispVal
+applyProc [func, List args] = apply func args
+applyProc (func : args)     = apply func args
+
+makePort :: IOMode -> [LispVal] -> IOThrowsError LispVal
+makePort mode [String filename] = liftM Port $ liftIO $ openFile filename mode
+
+closePort :: [LispVal] -> IOThrowsError LispVal
+closePort [Port port] = liftIO $hClose port >> (return $ Bool True)
+closePort 	    _ = return $ Bool False
+
+readProc :: [LispVal] -> IOThrowsError LispVal
+readProc 	  [] = readProc [Port stdin]
+readProc [Port port] = (liftIO $ hGetLine port) >>= liftThrows . readExpr
+
+writeProc :: [LispVal] -> IOThrowsError LispVal
+writeProc 	     [obj] = writeProc [obj, Port stdout]
+writeProc [obj, Port port] = liftIO $ hPrint port obj >> (return $ Bool True)
+
+readContents :: [LispVal] -> IOThrowsError LispVal
+readContents [String filename] = liftM String $ liftIO $ readFile filename
+
+readAll :: [LispVal] -> IOThrowsError LispVal
+readAll [String filename] = liftM List $ load filename
+
+load :: String -> IOThrowsError [LispVal]
+load filename = (liftIO $ readFile filename) >>= liftThrows . readExprList
