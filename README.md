@@ -3,4 +3,4 @@
 
 use `make all`
 
-To include a small standard library, use `(load "stdlib.scm")` in the repl
+To include a small standard library, use `(load "stdlib.scm")` in the interpreter
